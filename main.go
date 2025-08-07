@@ -2,35 +2,29 @@ package main
 
 import (
 	"context"
-	"database/sql"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"html/template"
 	"log"
 	"net/http"
-	"strings"
+	"sync"
 	"time"
-
-	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
-	"golang.org/x/crypto/bcrypt"
 )
 
-type contextKey string
-
-var (
-	db  *sql.DB
-	tpl *template.Template
-)
+type userKey struct{}
 
 type User struct {
-	ID    int
-	Email string
+	ID           int
+	Email        string
+	PasswordHash string
 }
 
 type Post struct {
 	ID          int
 	Title       string
 	Content     string
-	CreatedAt   string
+	CreatedAt   time.Time
 	AuthorEmail string
 	Categories  []string
 	Likes       int
@@ -43,17 +37,25 @@ type TemplateData struct {
 	User  *User
 }
 
-func main() {
-	var err error
-	db, err = sql.Open("sqlite3", "forumx.db")
-	if err != nil {
-		log.Fatal(err)
-	}
-	if _, err = db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		log.Fatal(err)
-	}
+var (
+	tpl      *template.Template
+	mu       sync.Mutex
+	users    = map[string]*User{}
+	sessions = map[string]session{}
+	posts    []Post
+	nextUID  = 1
+	nextPID  = 1
+)
 
+type session struct {
+	user    *User
+	expires time.Time
+}
+
+func main() {
 	tpl = template.Must(template.ParseFiles("index.html"))
+	users["test@example.com"] = &User{ID: nextUID, Email: "test@example.com", PasswordHash: hashPassword("password")}
+	nextUID++
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleIndex)
@@ -74,14 +76,14 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	posts, err := loadPosts(r)
+	ps, err := loadPosts(r)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
 	data := TemplateData{
 		Theme: themeFromCookie(r),
-		Posts: posts,
+		Posts: ps,
 		User:  currentUser(r),
 	}
 	if err := tpl.ExecuteTemplate(w, "index", data); err != nil {
@@ -96,24 +98,17 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	email := r.FormValue("email")
 	password := r.FormValue("password")
-	var id int
-	var hash string
-	err := db.QueryRow("SELECT id, password_hash FROM users WHERE email = ?", email).Scan(&id, &hash)
-	if err != nil {
+	mu.Lock()
+	u, ok := users[email]
+	if !ok || !checkPassword(u.PasswordHash, password) {
+		mu.Unlock()
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
-		http.Error(w, "invalid credentials", http.StatusUnauthorized)
-		return
-	}
-	sid := uuid.New().String()
+	sid := newSessionID()
 	exp := time.Now().Add(24 * time.Hour)
-	_, err = db.Exec("INSERT INTO sessions(id, user_id, expires_at) VALUES(?,?,?)", sid, id, exp)
-	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
-		return
-	}
+	sessions[sid] = session{user: u, expires: exp}
+	mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: "session", Value: sid, Path: "/", Expires: exp, HttpOnly: true})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -135,22 +130,18 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 	title := r.FormValue("title")
 	content := r.FormValue("content")
 	cats := r.Form["categories"]
-	tx, err := db.Begin()
-	if err != nil {
-		http.Error(w, "server error", 500)
-		return
+	mu.Lock()
+	p := Post{
+		ID:          nextPID,
+		Title:       title,
+		Content:     content,
+		CreatedAt:   time.Now(),
+		AuthorEmail: user.Email,
+		Categories:  cats,
 	}
-	res, err := tx.Exec("INSERT INTO posts(user_id, title, content) VALUES(?,?,?)", user.ID, title, content)
-	if err != nil {
-		tx.Rollback()
-		http.Error(w, "server error", 500)
-		return
-	}
-	pid, _ := res.LastInsertId()
-	for _, c := range cats {
-		tx.Exec("INSERT INTO post_categories(post_id, category) VALUES(?,?)", pid, c)
-	}
-	tx.Commit()
+	nextPID++
+	posts = append(posts, p)
+	mu.Unlock()
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -160,22 +151,20 @@ func staticHandler(name string) http.HandlerFunc {
 	}
 }
 
-type userKey struct{}
-
 func withSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("session")
 		if err == nil {
-			var u User
-			var expires time.Time
-			err = db.QueryRow("SELECT users.id, users.email, sessions.expires_at FROM sessions JOIN users ON sessions.user_id = users.id WHERE sessions.id = ?", cookie.Value).Scan(&u.ID, &u.Email, &expires)
-			if err == nil && expires.After(time.Now()) {
-				ctx := context.WithValue(r.Context(), userKey{}, &u)
-				newExp := time.Now().Add(24 * time.Hour)
-				db.Exec("UPDATE sessions SET expires_at = ? WHERE id = ?", newExp, cookie.Value)
-				http.SetCookie(w, &http.Cookie{Name: "session", Value: cookie.Value, Path: "/", Expires: newExp, HttpOnly: true})
+			mu.Lock()
+			s, ok := sessions[cookie.Value]
+			if ok && s.expires.After(time.Now()) {
+				s.expires = time.Now().Add(24 * time.Hour)
+				sessions[cookie.Value] = s
+				ctx := context.WithValue(r.Context(), userKey{}, s.user)
+				http.SetCookie(w, &http.Cookie{Name: "session", Value: cookie.Value, Path: "/", Expires: s.expires, HttpOnly: true})
 				r = r.WithContext(ctx)
 			}
+			mu.Unlock()
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -198,57 +187,44 @@ func themeFromCookie(r *http.Request) string {
 }
 
 func loadPosts(r *http.Request) ([]Post, error) {
-	args := []interface{}{}
-	q := `SELECT posts.id, posts.title, posts.content, posts.created_at, users.email,
-           GROUP_CONCAT(post_categories.category) as categories,
-           SUM(CASE WHEN likes.is_like=1 THEN 1 ELSE 0 END) as likes,
-           SUM(CASE WHEN likes.is_like=0 THEN 1 ELSE 0 END) as dislikes
-        FROM posts
-        JOIN users ON posts.user_id = users.id
-        LEFT JOIN post_categories ON posts.id = post_categories.post_id
-        LEFT JOIN likes ON posts.id = likes.post_id`
-	where := []string{}
 	filter := r.URL.Query().Get("filter")
-	if filter != "" {
-		where = append(where, "posts.id IN (SELECT post_id FROM post_categories WHERE category = ?)")
-		args = append(args, filter)
-	}
-	if r.URL.Query().Get("mine") == "true" {
-		if u := currentUser(r); u != nil {
-			where = append(where, "posts.user_id = ?")
-			args = append(args, u.ID)
-		} else {
-			where = append(where, "1=0")
+	mine := r.URL.Query().Get("mine") == "true"
+	u := currentUser(r)
+	mu.Lock()
+	defer mu.Unlock()
+	var out []Post
+	for _, p := range posts {
+		if filter != "" {
+			found := false
+			for _, c := range p.Categories {
+				if c == filter {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
 		}
-	}
-	if r.URL.Query().Get("liked") == "true" {
-		if u := currentUser(r); u != nil {
-			where = append(where, "posts.id IN (SELECT post_id FROM likes WHERE user_id = ? AND is_like = 1)")
-			args = append(args, u.ID)
-		} else {
-			where = append(where, "1=0")
+		if mine && (u == nil || p.AuthorEmail != u.Email) {
+			continue
 		}
+		out = append(out, p)
 	}
-	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
-	}
-	q += " GROUP BY posts.id ORDER BY posts.created_at DESC"
-	rows, err := db.Query(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var posts []Post
-	for rows.Next() {
-		var p Post
-		var cats sql.NullString
-		if err := rows.Scan(&p.ID, &p.Title, &p.Content, &p.CreatedAt, &p.AuthorEmail, &cats, &p.Likes, &p.Dislikes); err != nil {
-			return nil, err
-		}
-		if cats.Valid {
-			p.Categories = strings.Split(cats.String, ",")
-		}
-		posts = append(posts, p)
-	}
-	return posts, nil
+	return out, nil
+}
+
+func newSessionID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func hashPassword(pw string) string {
+	h := sha256.Sum256([]byte(pw))
+	return hex.EncodeToString(h[:])
+}
+
+func checkPassword(hash, pw string) bool {
+	return hash == hashPassword(pw)
 }
