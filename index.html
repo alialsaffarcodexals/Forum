@@ -1,0 +1,83 @@
+{{define "index"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ForumX</title>
+<style>
+:root { --bg: #fff; --fg: #000; --accent:#3366ff; }
+[data-theme="dark"], #theme-toggle:checked ~ body { --bg:#000; --fg:#fff; }
+body { background:var(--bg); color:var(--fg); font-family:sans-serif; margin:0; }
+nav { display:flex; justify-content:center; padding:1rem; background:var(--accent); color:#fff; position:relative; }
+nav a { color:#fff; margin:0 1rem; text-decoration:none; }
+nav .right { position:absolute; right:1rem; top:1rem; }
+.container { display:grid; grid-template-columns:1fr 3fr; gap:1rem; padding:1rem; }
+@media (max-width:768px){ .container{ grid-template-columns:1fr; } }
+.sidebar a { display:block; margin-bottom:.5rem; }
+.post { border:1px solid var(--accent); padding:1rem; margin-bottom:1rem; }
+.new-post { border:1px solid var(--accent); padding:1rem; margin-bottom:1rem; }
+footer { text-align:center; padding:1rem; background:var(--accent); color:#fff; }
+/* Modal */
+#login-toggle { display:none; }
+#login-toggle:checked + .modal { display:block; }
+.modal { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); }
+.modal .card { background:var(--bg); color:var(--fg); margin:10% auto; padding:1rem; width:300px; }
+#theme-toggle { display:none; }
+</style>
+</head>
+<input type="checkbox" id="theme-toggle" {{if eq .Theme "dark"}}checked{{end}}>
+<body {{if eq .Theme "dark"}}data-theme="dark"{{end}}>
+<nav>
+  <div class="left"><a href="/">Home</a> <a href="/about">About</a></div>
+  <div class="right"><label for="login-toggle" style="cursor:pointer;">Login</label></div>
+</nav>
+<input type="checkbox" id="login-toggle">
+<div class="modal">
+  <div class="card">
+    <form method="POST" action="/login">
+      <h3>Login</h3>
+      <input type="email" name="email" placeholder="Email" required><br>
+      <input type="password" name="password" placeholder="Password" required><br>
+      <button type="submit">Login</button>
+    </form>
+  </div>
+</div>
+<div class="container">
+  <aside class="sidebar">
+    <a href="/?filter=General">General</a>
+    <a href="/?filter=Tech">Tech</a>
+    <a href="/?filter=News">News</a>
+    <a href="/?filter=Fun">Fun</a>
+    <a href="/?mine=true">My Posts</a>
+    <a href="/?liked=true">Liked Posts</a>
+  </aside>
+  <main>
+    <div class="new-post">
+      <h3>Create New Post</h3>
+      <form method="POST" action="/posts">
+        <input type="text" name="title" placeholder="Title" required><br>
+        <label><input type="checkbox" name="categories" value="General"> General</label>
+        <label><input type="checkbox" name="categories" value="Tech"> Tech</label>
+        <label><input type="checkbox" name="categories" value="News"> News</label>
+        <label><input type="checkbox" name="categories" value="Fun"> Fun</label><br>
+        <textarea name="content" placeholder="Content" required></textarea><br>
+        <button type="submit">Post</button>
+      </form>
+    </div>
+    {{range .Posts}}
+    <article class="post">
+      <h2>{{.Title}}</h2>
+      <div>{{.Content}}</div>
+      <small>By {{.AuthorEmail}} at {{.CreatedAt}}</small><br>
+      <small>Categories: {{range .Categories}}{{.}} {{end}}</small><br>
+      <small>Likes: {{.Likes}} Dislikes: {{.Dislikes}}</small>
+    </article>
+    {{end}}
+  </main>
+</div>
+<footer>
+  <a href="/about">About</a> | <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a>
+</footer>
+</body>
+</html>
+{{end}}
