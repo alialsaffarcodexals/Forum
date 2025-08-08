@@ -1,0 +1,12 @@
+{{template "base" .}}
+
+{{define "title"}}Login{{end}}
+
+{{define "content"}}
+<h1>Login</h1>
+<form action="/login" method="post">
+    <label>Email <input type="email" name="email" required></label>
+    <label>Password <input type="password" name="password" required></label>
+    <button type="submit">Login</button>
+</form>
+{{end}}

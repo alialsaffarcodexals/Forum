@@ -1,0 +1,34 @@
+{{template "base" .}}
+
+{{define "title"}}{{.Post.Title}}{{end}}
+
+{{define "content"}}
+<article>
+    <h1>{{.Post.Title}}</h1>
+    <p>{{.Post.Content}}</p>
+    <small>By {{.Post.Author}} • Categories: {{range .Post.Categories}}{{.}} {{end}}</small>
+</article>
+
+<section>
+    <h2>Comments</h2>
+    {{if .User}}
+        <form action="/posts/{{.Post.ID}}/comments" method="post">
+            <textarea name="content" rows="4" required></textarea>
+            <button type="submit">Add Comment</button>
+        </form>
+    {{else}}
+        <p><a href="/login">Login</a> to comment.</p>
+    {{end}}
+
+    {{if .Comments}}
+        {{range .Comments}}
+            <div class="comment">
+                <p>{{.Content}}</p>
+                <small>By {{.Author}}</small>
+            </div>
+        {{end}}
+    {{else}}
+        <p>No comments yet.</p>
+    {{end}}
+</section>
+{{end}}

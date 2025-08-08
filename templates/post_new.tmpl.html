@@ -1,0 +1,13 @@
+{{template "base" .}}
+
+{{define "title"}}New Post{{end}}
+
+{{define "content"}}
+<h1>Create New Post</h1>
+<form action="/posts/create" method="post">
+    <label>Title <input type="text" name="title" required></label>
+    <label>Content <textarea name="content" rows="6" required></textarea></label>
+    <label>Categories (comma separated) <input type="text" name="categories"></label>
+    <button type="submit">Publish</button>
+</form>
+{{end}}

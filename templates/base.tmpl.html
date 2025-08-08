@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{block "title" .}}Go Forum{{end}}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+    <nav>
+        <a href="/">Go Forum</a>
+        <div class="nav-right">
+            {{if .User}}
+                <span>Welcome, {{.User.Username}}</span>
+                <a href="/posts/new">New Post</a>
+                <a href="/logout">Logout</a>
+            {{else}}
+                <a href="/login">Login</a>
+                <a href="/register">Register</a>
+            {{end}}
+        </div>
+    </nav>
+</header>
+
+<main>
+    {{block "content" .}}{{end}}
+</main>
+
+<footer>
+    <p>© Go Forum</p>
+</footer>
+</body>
+</html>

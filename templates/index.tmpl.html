@@ -1,0 +1,11 @@
+{{ define "content" }}
+<h1>Recent Posts</h1>
+{{ range .Posts }}
+<article>
+    <h2>{{ .Title }}</h2>
+    <p>{{ .Content }}</p>
+</article>
+{{ else }}
+<p>No posts yet.</p>
+{{ end }}
+{{ end }}
