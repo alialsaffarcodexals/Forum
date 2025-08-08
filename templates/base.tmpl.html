@@ -1,3 +1,46 @@
+{{/* The base layout for all pages. It defines a title block and a content block that child
+templates can override. All markup is wrapped in a named template so that it can be invoked
+from child templates via {{template "base" .}}. */}}
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{block "title" .}}Go Forum{{end}}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="/" class="brand">Go Forum</a>
+            <nav>
+                {{if .User}}
+                    <span>Welcome, {{.User.Username}}</span>
+                    <a href="/posts/new">New Post</a>
+                    {{/* Logout must be a POST to avoid CSRF via GET. Wrap the button in an inline form. */}}
+                    <form action="/logout" method="post" style="display:inline">
+                        <button type="submit">Logout</button>
+                    </form>
+                {{else}}
+                    <a href="/login">Login</a>
+                    <a href="/register">Register</a>
+                {{end}}
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        {{block "content" .}}{{end}}
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>© Go Forum</p>
+        </div>
+    </footer>
+</body>
+</html>
+{{end}}
 <!DOCTYPE html>
 <html lang="en">
 <head>
